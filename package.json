@@ -1,18 +1,18 @@
 {
-  "name": "faleh-music-bot-ultimate",
-  "version": "1.3.0",
-  "description": "Discord music bot AR/EN, no prefix, 24/7, owner commands, multi-source (play-dl), plus popular features (volume/loop/shuffle/seek/nowplaying/remove/jump/clear).",
+  "name": "faleh-music-bot",
+  "version": "1.0.0",
+  "description": "Ultimate Discord Music Bot by Faleh",
   "main": "index.js",
   "type": "module",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "@discordjs/opus": "^0.9.0",
-    "@discordjs/voice": "^0.16.0",
     "discord.js": "^14.15.3",
-    "play-dl": "^1.9.6",
-    "yt-search": "^2.11.2"
+    "@discordjs/voice": "^0.17.0",
+    "play-dl": "^1.9.7",
+    "@discordjs/opus": "^0.9.0",
+    "ffmpeg-static": "^5.2.0"
   },
   "engines": {
     "node": ">=18"
