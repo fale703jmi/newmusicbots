@@ -10,6 +10,9 @@ import {
 import ytdl from "ytdl-core";
 import yts from "yt-search";
 
+// ✅ ID صاحب البوت (إنت)
+const OWNER_ID = "1268018033268621455";
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -19,7 +22,7 @@ const client = new Client({
   ],
 });
 
-// ✅ عربي + إنجليزي بدون بادئة
+// ✅ أوامر عربي + إنجليزي بدون بادئة
 const commandMap = new Map([
   // تشغيل
   ["play", "play"], ["شغل", "play"], ["شغّل", "play"],
@@ -34,10 +37,14 @@ const commandMap = new Map([
   // قائمة
   ["queue", "queue"], ["قائمة", "queue"], ["صف", "queue"],
   // خروج
-  ["leave", "leave"], ["اطلع", "leave"], ["اخرج", "leave"]
+  ["leave", "leave"], ["اطلع", "leave"], ["اخرج", "leave"],
+  // أوامر الأونر
+  ["غيرافتار", "setavatar"],
+  ["غيراسم", "setname"],
+  ["غيرحالة", "setstatus"]
 ]);
 
-const queues = new Map(); // guildId -> { songs, player, textChannel, voiceChannel, connection, playing }
+const queues = new Map();
 
 client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
@@ -52,6 +59,7 @@ client.on("messageCreate", async (message) => {
   if (!cmd) return;
 
   try {
+    // 🎶 أوامر الميوزك
     if (cmd === "play") return handlePlay(message, parts.join(" "));
     if (cmd === "skip") return handleSkip(message);
     if (cmd === "stop") return handleStop(message);
@@ -59,6 +67,50 @@ client.on("messageCreate", async (message) => {
     if (cmd === "resume") return handleResume(message);
     if (cmd === "queue") return handleQueue(message);
     if (cmd === "leave") return handleLeave(message);
+
+    // 👑 أوامر الأونر الخاصة
+    if (message.author.id !== OWNER_ID) {
+      return message.reply("❌ هذا الأمر مخصص لصاحب البوت فقط.");
+    }
+
+    if (cmd === "setavatar") {
+      const url = parts[0];
+      if (!url) return message.reply("حط رابط صورة.");
+      try {
+        await client.user.setAvatar(url);
+        return message.reply("✅ تم تغيير صورة البوت.");
+      } catch (e) {
+        console.error(e);
+        return message.reply("❌ ما قدرت أغير الصورة (جرب رابط صحيح أو انتظر شوية).");
+      }
+    }
+
+    if (cmd === "setname") {
+      const newName = parts.join(" ");
+      if (!newName) return message.reply("حط اسم جديد.");
+      try {
+        await client.user.setUsername(newName);
+        return message.reply(`✅ تم تغيير اسم البوت إلى: ${newName}`);
+      } catch (e) {
+        console.error(e);
+        return message.reply("❌ ما قدرت أغير الاسم (فيه حد زمني لتغيير الاسم).");
+      }
+    }
+
+    if (cmd === "setstatus") {
+      const newStatus = parts.join(" ");
+      if (!newStatus) return message.reply("حط حالة جديدة.");
+      try {
+        client.user.setPresence({
+          activities: [{ name: newStatus }],
+          status: "online"
+        });
+        return message.reply("✅ تم تحديث الحالة.");
+      } catch (e) {
+        console.error(e);
+        return message.reply("❌ ما قدرت أغير الحالة.");
+      }
+    }
   } catch (e) {
     console.error(e);
     return message.reply("صار خطأ غير متوقع 🥲");
