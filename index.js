@@ -1,4 +1,3 @@
-
 import { Client, GatewayIntentBits, PermissionsBitField, ChannelType } from "discord.js";
 import {
   joinVoiceChannel,
@@ -8,17 +7,16 @@ import {
   NoSubscriberBehavior,
   getVoiceConnection
 } from "@discordjs/voice";
-import * as play from "play-dl";
+import ytdl from "ytdl-core";
+import yts from "yt-search";
 import ffmpeg from "ffmpeg-static";
 
 if (ffmpeg) process.env.FFMPEG_PATH = ffmpeg;
 
-// ID حقك (غيره لو تبي)
 const OWNER_ID = process.env.OWNER_ID || "1268018033268621455";
 
-// تخزين الروم المثبت
-const lockedChannelPerGuild = new Map();
-const queues = new Map();
+const lockedChannelPerGuild = new Map(); // guildId -> voiceChannelId
+const queues = new Map(); // guildId -> { songs, player, playing, volume }
 
 const commandMap = new Map([
   ["join","join"], ["تعال","join"],
@@ -32,10 +30,10 @@ const commandMap = new Map([
   ["غيرافتار","setavatar"], ["غيراسم","setname"], ["غيرحالة","setstatus"]
 ]);
 
-function isMod(member) {
-  return member.id === OWNER_ID ||
-         member.permissions.has(PermissionsBitField.Flags.BanMembers) ||
-         member.permissions.has(PermissionsBitField.Flags.ManageGuild);
+function isMod(m) {
+  return m.id === OWNER_ID ||
+         m.permissions.has(PermissionsBitField.Flags.BanMembers) ||
+         m.permissions.has(PermissionsBitField.Flags.ManageGuild);
 }
 
 const client = new Client({
@@ -47,9 +45,7 @@ const client = new Client({
   ],
 });
 
-client.once("ready", () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
-});
+client.once("ready", () => console.log(`✅ Logged in as ${client.user.tag}`));
 
 client.on("messageCreate", async (message) => {
   if (!message.guild || message.author.bot) return;
@@ -60,12 +56,12 @@ client.on("messageCreate", async (message) => {
   if (!cmd) return;
 
   try {
+    // تعال @البوت
     if (cmd === "join") {
       if (!isMod(message.member)) return;
       const mentioned = message.mentions.users.first();
       if (!mentioned || mentioned.id !== client.user.id) return;
-      const userVc = message.member?.voice?.channel;
-      if (!userVc) return;
+      const userVc = message.member?.voice?.channel; if (!userVc) return;
 
       joinVoiceChannel({
         channelId: userVc.id,
@@ -91,61 +87,44 @@ client.on("messageCreate", async (message) => {
     }
 
     switch (cmd) {
-      case "play": {
-        message.reply("حاضر ياسيدي 😝").catch(()=>{});
-        return handlePlay(message, parts.join(" "));
-      }
-      case "skip":   return handleSkip(message);
-      case "stop":   return handleStop(message);
-      case "pause":  return handlePause(message);
-      case "resume": return handleResume(message);
-      case "queue":  return handleQueue(message);
-      case "leave":  return handleLeave(message);
+      case "play":  message.reply("حاضر ياسيدي 😝").catch(()=>{}); return handlePlay(message, parts.join(" "));
+      case "skip":  return handleSkip(message);
+      case "stop":  return handleStop(message);
+      case "pause": return handlePause(message);
+      case "resume":return handleResume(message);
+      case "queue": return handleQueue(message);
+      case "leave": return handleLeave(message);
     }
 
+    // أوامر الأونر (صامتة)
     if (message.author.id !== OWNER_ID) return;
-    if (cmd === "setavatar") {
-      const url = parts[0]; if (!url) return;
-      try { await client.user.setAvatar(url); } catch {}
-      return;
-    }
-    if (cmd === "setname") {
-      const name = parts.join(" "); if (!name) return;
-      try { await client.user.setUsername(name); } catch {}
-      return;
-    }
-    if (cmd === "setstatus") {
-      const text = parts.join(" "); if (!text) return;
-      client.user.setPresence({ activities: [{ name: text }], status: "online" });
-      return;
-    }
-  } catch (e) {
-    console.error(e);
-  }
+    if (cmd === "setavatar") { const url = parts[0]; if (!url) return; try { await client.user.setAvatar(url); } catch {} return; }
+    if (cmd === "setname")   { const name = parts.join(" "); if (!name) return; try { await client.user.setUsername(name); } catch {} return; }
+    if (cmd === "setstatus") { const text = parts.join(" "); if (!text) return; client.user.setPresence({ activities: [{ name: text }], status: "online" }); return; }
+  } catch (e) { console.error(e); }
 });
 
-// ===== Functions =====
-function getOrCreateQueue(guild, channel) {
+// ===== Helpers =====
+function getOrCreateQueue(guild) {
   let q = queues.get(guild.id);
   if (!q) {
     q = {
       songs: [],
       player: createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } }),
-      textChannel: channel,
       playing: false,
       volume: 1.0
     };
     queues.set(guild.id, q);
 
+    q.player.on(AudioPlayerStatus.Playing, () => { q.playing = true; });
     q.player.on(AudioPlayerStatus.Idle, () => {
-      q.songs.shift();
+      if (q.songs.length) q.songs.shift();
       if (q.songs.length) playNext(guild, q);
       else q.playing = false;
     });
-
     q.player.on("error", (err) => {
       console.error("Player error:", err);
-      q.songs.shift();
+      if (q.songs.length) q.songs.shift();
       if (q.songs.length) playNext(guild, q);
       else q.playing = false;
     });
@@ -153,9 +132,11 @@ function getOrCreateQueue(guild, channel) {
   return q;
 }
 
+// ===== Play flow (ytdl-core فقط) =====
 async function handlePlay(message, query) {
   if (!query) return;
 
+  // تأكد من الاتصال والاشتراك
   const lockedId = lockedChannelPerGuild.get(message.guild.id);
   let conn = getVoiceConnection(message.guild.id);
   if (!conn && lockedId) {
@@ -165,25 +146,38 @@ async function handlePlay(message, query) {
       adapterCreator: message.guild.voiceAdapterCreator
     });
   }
+  if (conn) {
+    // نضمن الاشتراك قبل التشغيل
+    const q = getOrCreateQueue(message.guild);
+    conn.subscribe(q.player);
+  }
 
+  // تنظيف روابط يوتيوب
   if (query.includes("youtube.com") || query.includes("youtu.be")) {
     query = query.split("&")[0];
     if (query.includes("?si")) query = query.split("?si")[0];
   }
 
+  // تحديد الرابط
   let trackUrl = null;
   let title = query;
   try {
     if (/^https?:\/\//i.test(query)) {
       trackUrl = query;
+      if (ytdl.validateURL(trackUrl)) {
+        const info = await ytdl.getInfo(trackUrl).catch(()=>null);
+        if (info) title = info.videoDetails?.title || title;
+      }
     } else {
-      const s = await play.search(query, { limit: 1, source: { youtube: "video" } });
-      if (s?.length) { trackUrl = s[0].url; title = s[0].title; }
+      const res = await yts(query);
+      const v = res && res.videos && res.videos[0];
+      if (v) { trackUrl = v.url; title = v.title; }
     }
   } catch (e) { console.error("Search error:", e); }
 
-  if (!trackUrl) return;
-  const q = getOrCreateQueue(message.guild, message.channel);
+  if (!trackUrl || !ytdl.validateURL(trackUrl)) return;
+
+  const q = getOrCreateQueue(message.guild);
   q.songs.push({ url: trackUrl, title });
   if (!q.playing) playNext(message.guild, q);
 }
@@ -191,27 +185,43 @@ async function handlePlay(message, query) {
 async function playNext(guild, q) {
   const current = q.songs[0];
   if (!current) return;
+
   try {
-    const stream = await play.stream(current.url);
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type,
-      inlineVolume: true
+    // تأكد الاشتراك موجود
+    let conn = getVoiceConnection(guild.id);
+    if (!conn) {
+      const lockedId = lockedChannelPerGuild.get(guild.id);
+      if (!lockedId) { q.playing = false; return; }
+      conn = joinVoiceChannel({
+        channelId: lockedId,
+        guildId: guild.id,
+        adapterCreator: guild.voiceAdapterCreator
+      });
+    }
+    conn.subscribe(q.player);
+
+    // ytdl-core stream
+    const stream = ytdl(current.url, {
+      filter: "audioonly",
+      quality: "highestaudio",
+      highWaterMark: 1 << 25,     // يمنع الانقطاع السريع
+      dlChunkSize: 0               // تدفق مستمر
     });
+
+    const resource = createAudioResource(stream, { inlineVolume: true });
     resource.volume?.setVolume(q.volume ?? 1.0);
 
     q.player.play(resource);
     q.playing = true;
-
-    let conn = getVoiceConnection(guild.id);
-    if (conn) conn.subscribe(q.player);
   } catch (e) {
     console.error("Stream error:", e);
-    q.songs.shift();
+    if (q.songs.length) q.songs.shift();
     if (q.songs.length) playNext(guild, q);
     else q.playing = false;
   }
 }
 
+// ===== باقي الأوامر (صامتة) =====
 function handleSkip(message) {
   const q = queues.get(message.guild.id);
   if (q && q.playing) q.player.stop(true);
@@ -238,5 +248,4 @@ function handleLeave(message) {
   lockedChannelPerGuild.delete(message.guild.id);
 }
 
-// ===== Login =====
 client.login(process.env.TOKEN);
