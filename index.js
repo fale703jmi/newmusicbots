@@ -10,35 +10,14 @@ import {
 } from "@discordjs/voice";
 import * as play from "play-dl";
 
-// ====== إعدادات أمان بسيطة ======
-const OWNER_ID = process.env.OWNER_ID || "1268018033268621455"; // غيّرها إذا لزم
-// =================================
+const OWNER_ID = process.env.OWNER_ID || "1268018033268621455";
 
-// خريطة: لكل سيرفر، الروم اللي "مقفل" عليه هذا البوت
-// key = guildId, value = voiceChannelId
+// نخزن الروم المثبت لكل سيرفر
 const lockedChannelPerGuild = new Map();
 
-// خريطة أوامر عربي/إنجليزي بدون بريفكس
-const commandMap = new Map([
-  // انضمام بالروم عبر منشن
-  ["join", "join"], ["تعال", "join"],
-
-  // موسيقى
-  ["play","play"], ["شغل","play"], ["شغّل","play"],
-  ["skip","skip"], ["تخطي","skip"],
-  ["stop","stop"], ["ايقاف","stop"], ["إيقاف","stop"],
-  ["pause","pause"], ["وقف","pause"],
-  ["resume","resume"], ["كمل","resume"], ["استئناف","resume"],
-  ["queue","queue"], ["قائمة","queue"], ["صف","queue"],
-  ["leave","leave"], ["اطلع","leave"], ["اخرج","leave"],
-
-  // مالك البوت
-  ["غيرافتار","setavatar"], ["غيراسم","setname"], ["غيرحالة","setstatus"]
-]);
-
-// صف التشغيل لكل سيرفر
+// صف التشغيل
 const queues = new Map();
-// model: queues.set(guildId, { songs: [{url,title}], player, textChannel, connection, playing, volume:1.0, loop:'off' })
+// { songs:[{url,title}], player, textChannel, connection, playing, volume }
 
 const client = new Client({
   intents: [
@@ -48,6 +27,26 @@ const client = new Client({
     GatewayIntentBits.MessageContent
   ],
 });
+
+// أوامر
+const commandMap = new Map([
+  ["join","join"], ["تعال","join"],
+  ["play","play"], ["شغل","play"], ["شغّل","play"],
+  ["skip","skip"], ["تخطي","skip"],
+  ["stop","stop"], ["ايقاف","stop"], ["إيقاف","stop"],
+  ["pause","pause"], ["وقف","pause"],
+  ["resume","resume"], ["كمل","resume"], ["استئناف","resume"],
+  ["queue","queue"], ["قائمة","queue"], ["صف","queue"],
+  ["leave","leave"], ["اطلع","leave"], ["اخرج","leave"],
+  // أوامر الأونر
+  ["غيرافتار","setavatar"], ["غيراسم","setname"], ["غيرحالة","setstatus"]
+]);
+
+function isMod(member) {
+  return member.permissions.has("BanMembers") ||
+         member.permissions.has("ManageGuild") ||
+         member.id === OWNER_ID;
+}
 
 client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
@@ -62,83 +61,70 @@ client.on("messageCreate", async (message) => {
   if (!cmd) return;
 
   try {
-    // —— أمر الانضمام: لازم منشن للبوت عشان ما يجي كل البوتات ——
+    // —— أمر join (تعال) —— //
     if (cmd === "join") {
-      // شيّك المنشن
+      if (!isMod(message.member)) return; // بس للأدمن
       const mentioned = message.mentions.users.first();
-      if (!mentioned) return message.reply("اذكر البوت بالمنشن: `تعال @اسم_البوت`");
-      if (mentioned.id !== client.user.id) return; // مو أنا → أتجاهل
-
+      if (!mentioned || mentioned.id !== client.user.id) return;
       const userVc = message.member?.voice?.channel;
-      if (!userVc) return message.reply("ادخل روم صوتي أولًا.");
-
-      // ادخل الروم وثبّت القناة لهذا السيرفر
+      if (!userVc) return;
       joinVoiceChannel({
         channelId: userVc.id,
         guildId: message.guild.id,
         adapterCreator: message.guild.voiceAdapterCreator
       });
       lockedChannelPerGuild.set(message.guild.id, userVc.id);
-      return message.reply(`✅ دخلت الروم: **${userVc.name}** وبجلس فيه لين تقول \`اطلع\`.`);
+      return;
     }
 
-    // —— أوامر الموسيقى والأوامر الخاصة —— //
-    const ownerOnly = new Set(["setavatar","setname","setstatus"]);
+    // أوامر الموسيقى
     const musicCommands = new Set(["play","skip","stop","pause","resume","queue","leave"]);
-
-    // لو أمر موسيقى: لازم الكاتب والبوت في نفس الروم المقفول
     if (musicCommands.has(cmd)) {
+      if (!isMod(message.member)) return; // بس للأدمن
       const lockedId = lockedChannelPerGuild.get(message.guild.id);
-      if (!lockedId) {
-        return message.reply("ما عندي روم مثبت. قل: `تعال @اسم_البوت` وأنا أجيك وأثبت الروم.");
-      }
+      if (!lockedId) return;
       const userVcId = message.member?.voice?.channelId;
-      if (userVcId !== lockedId) {
-        return message.reply("الأوامر تشتغل فقط في الروم اللي أنا مثبت فيه. تعال عندي هناك 🎧");
-      }
+      if (userVcId !== lockedId) return;
     }
 
-    // نفذ الأوامر
     switch (cmd) {
-      case "play":   return handlePlay(message, parts.join(" "));
+      case "play": {
+        message.reply("حاضر ياسيدي 😝").catch(()=>{});
+        return handlePlay(message, parts.join(" "));
+      }
       case "skip":   return handleSkip(message);
       case "stop":   return handleStop(message);
       case "pause":  return handlePause(message);
       case "resume": return handleResume(message);
       case "queue":  return handleQueue(message);
       case "leave":  return handleLeave(message);
-
-      case "setavatar":
-      case "setname":
-      case "setstatus": {
-        if (message.author.id !== OWNER_ID) return message.reply("❌ هذا الأمر لصاحب البوت فقط.");
-        if (cmd === "setavatar") {
-          const url = parts[0];
-          if (!url) return message.reply("حط رابط صورة.");
-          try { await client.user.setAvatar(url); return message.reply("✅ تم تغيير صورة البوت."); }
-          catch { return message.reply("❌ فشل تغيير الصورة."); }
-        }
-        if (cmd === "setname") {
-          const newName = parts.join(" ");
-          if (!newName) return message.reply("حط اسم جديد.");
-          try { await client.user.setUsername(newName); return message.reply(`✅ الاسم صار: ${newName}`); }
-          catch { return message.reply("❌ فشل تغيير الاسم (قد يكون فيه حد زمني)."); }
-        }
-        if (cmd === "setstatus") {
-          const text = parts.join(" ");
-          if (!text) return message.reply("حط حالة جديدة.");
-          client.user.setPresence({ activities: [{ name: text }], status: "online" });
-          return message.reply("✅ تم تحديث الحالة.");
-        }
-      }
     }
+
+    // أوامر الأونر فقط
+    if (message.author.id !== OWNER_ID) return;
+    if (cmd === "setavatar") {
+      const url = parts[0]; if (!url) return;
+      try { await client.user.setAvatar(url); } catch {}
+      return;
+    }
+    if (cmd === "setname") {
+      const name = parts.join(" "); if (!name) return;
+      try { await client.user.setUsername(name); } catch {}
+      return;
+    }
+    if (cmd === "setstatus") {
+      const text = parts.join(" "); if (!text) return;
+      client.user.setPresence({ activities: [{ name: text }], status: "online" });
+      return;
+    }
+
   } catch (e) {
     console.error(e);
-    return message.reply("صار خطأ غير متوقع 🥲");
   }
 });
 
-// —————— وظائف الموسيقى ——————
+// ================= Functions =================
+
 function getOrCreateQueue(guild, channel) {
   let q = queues.get(guild.id);
   if (!q) {
@@ -154,26 +140,17 @@ function getOrCreateQueue(guild, channel) {
     queues.set(guild.id, q);
 
     q.player.on(AudioPlayerStatus.Idle, () => {
-      // تكرار
-      if (q.loop === "one") {
-        // لا نحذف الحالي
-      } else if (q.loop === "all" && q.songs.length > 0) {
-        q.songs.push(q.songs.shift());
-      } else {
-        q.songs.shift();
-      }
+      q.songs.shift();
       if (q.songs.length) playNext(guild, q);
       else q.playing = false;
     });
 
     q.player.on("error", (err) => {
       console.error("Player error:", err);
-      q.textChannel?.send("في مشكلة بالصوت، بتخطى.");
       q.songs.shift();
       if (q.songs.length) playNext(guild, q);
     });
 
-    // اشترك لو فيه اتصال
     const conn = getVoiceConnection(guild.id);
     if (conn) conn.subscribe(q.player);
   }
@@ -181,13 +158,10 @@ function getOrCreateQueue(guild, channel) {
 }
 
 async function handlePlay(message, query) {
-  if (!query) return message.reply("اكتب رابط أو كلمات بحث بعد الأمر.");
-
-  // لازم أكون داخل الروم المقفول
+  if (!query) return;
   const lockedId = lockedChannelPerGuild.get(message.guild.id);
   let conn = getVoiceConnection(message.guild.id);
   if (!conn) {
-    // ادخل الروم المثبّت (لو مو متصل)
     joinVoiceChannel({
       channelId: lockedId,
       guildId: message.guild.id,
@@ -196,41 +170,34 @@ async function handlePlay(message, query) {
     conn = getVoiceConnection(message.guild.id);
   }
 
-  // نظّف روابط يوتيوب من ?si والمعلمات
   if (query.includes("youtube.com") || query.includes("youtu.be")) {
     query = query.split("&")[0];
     if (query.includes("?si")) query = query.split("?si")[0];
   }
 
   const q = getOrCreateQueue(message.guild, message.channel);
-
-  // حدّد المصدر: رابط/بحث
   let trackUrl = null;
   let title = query;
   try {
     if (/^https?:\/\//i.test(query)) {
       const kind = play.validate(query);
       if (kind === "sp_track") {
-        // سبوتيفاي → نجيب أقرب نتيجة من يوتيوب
         const sp = await play.spotify(query);
         title = `${sp.name} ${sp.artists?.[0]?.name || ""}`;
         const s = await play.search(title, { limit: 1, source: { youtube: "video" } });
         if (s?.length) { trackUrl = s[0].url; title = s[0].title || title; }
       } else {
-        // يوتيوب/ساوندكلاود/رابط مباشر
         trackUrl = query;
       }
     } else {
-      // بحث بالاسم
       const s = await play.search(query, { limit: 1, source: { youtube: "video" } });
       if (s?.length) { trackUrl = s[0].url; title = s[0].title || query; }
     }
   } catch {}
 
-  if (!trackUrl) return message.reply("ما قدرت أجد مصدر صالح للتشغيل.");
+  if (!trackUrl) return;
 
   q.songs.push({ url: trackUrl, title });
-  message.channel.send(`🎶 أضفت للصف: **${title}**`);
   if (!q.playing) playNext(message.guild, q);
 }
 
@@ -244,14 +211,11 @@ async function playNext(guild, q) {
     q.player.play(resource);
     q.playing = true;
 
-    // تأكد من الاشتراك
     const conn = getVoiceConnection(guild.id);
     if (conn) conn.subscribe(q.player);
 
-    q.textChannel?.send(`▶️ الآن يشغَّل: **${current.title || current.url}**`);
   } catch (e) {
     console.error("Stream error:", e);
-    q.textChannel?.send("تعذر تشغيل المقطع، بتخطى.");
     q.songs.shift();
     if (q.songs.length) playNext(guild, q);
     else q.playing = false;
@@ -260,36 +224,33 @@ async function playNext(guild, q) {
 
 function handleSkip(message) {
   const q = queues.get(message.guild.id);
-  if (!q || !q.playing) return message.reply("ما فيه تشغيل.");
+  if (!q || !q.playing) return;
   q.player.stop(true);
-  message.channel.send("⏭️ تخطيت للمقطع اللي بعده.");
 }
 
 function handleStop(message) {
   const q = queues.get(message.guild.id);
-  if (!q) return message.reply("ما فيه صف.");
+  if (!q) return;
   q.songs = [];
   q.player.stop(true);
-  message.channel.send("⏹️ وقفت التشغيل.");
 }
 
 function handlePause(message) {
   const q = queues.get(message.guild.id);
-  if (!q || !q.playing) return message.reply("ما فيه تشغيل.");
-  if (q.player.pause()) message.channel.send("⏸️ موقف مؤقت.");
+  if (!q || !q.playing) return;
+  q.player.pause();
 }
 
 function handleResume(message) {
   const q = queues.get(message.guild.id);
-  if (!q) return message.reply("ما فيه صف.");
-  if (q.player.unpause()) message.channel.send("▶️ كملنا التشغيل.");
+  if (!q) return;
+  q.player.unpause();
 }
 
 function handleQueue(message) {
   const q = queues.get(message.guild.id);
-  if (!q || !q.songs.length) return message.reply("الصف فاضي.");
-  const list = q.songs.map((s, i) => `${i===0?"**(الحالي)**":`${i}.`} ${s.title || s.url}`).slice(0,10).join("\n");
-  message.channel.send(`📜 الصف:\n${list}`);
+  if (!q || !q.songs.length) return;
+  // ما نطبع ولا شي عالشات (صامت)
 }
 
 function handleLeave(message) {
@@ -297,7 +258,6 @@ function handleLeave(message) {
   if (conn) conn.destroy();
   queues.delete(message.guild.id);
   lockedChannelPerGuild.delete(message.guild.id);
-  message.channel.send("👋 طلعت من الروم. إذا تبيني أرجع قل: `تعال @اسم_البوت`");
 }
 
 client.login(process.env.TOKEN);
