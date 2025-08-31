@@ -19,20 +19,40 @@ const client = new Client({
   ],
 });
 
-const prefix = "!";
-const queues = new Map();
+// ✅ عربي + إنجليزي بدون بادئة
+const commandMap = new Map([
+  // تشغيل
+  ["play", "play"], ["شغل", "play"], ["شغّل", "play"],
+  // تخطي
+  ["skip", "skip"], ["تخطي", "skip"],
+  // إيقاف كامل
+  ["stop", "stop"], ["ايقاف", "stop"], ["إيقاف", "stop"],
+  // إيقاف مؤقت
+  ["pause", "pause"], ["وقف", "pause"],
+  // استئناف
+  ["resume", "resume"], ["كمل", "resume"], ["استئناف", "resume"],
+  // قائمة
+  ["queue", "queue"], ["قائمة", "queue"], ["صف", "queue"],
+  // خروج
+  ["leave", "leave"], ["اطلع", "leave"], ["اخرج", "leave"]
+]);
+
+const queues = new Map(); // guildId -> { songs, player, textChannel, voiceChannel, connection, playing }
 
 client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
 client.on("messageCreate", async (message) => {
-  if (message.author.bot || !message.content.startsWith(prefix)) return;
-  const args = message.content.slice(prefix.length).trim().split(/ +/);
-  const cmd = args.shift()?.toLowerCase();
+  if (message.author.bot) return;
+
+  const parts = message.content.trim().split(/\s+/);
+  const rawCmd = (parts.shift() || "").toLowerCase();
+  const cmd = commandMap.get(rawCmd);
+  if (!cmd) return;
 
   try {
-    if (cmd === "play") return handlePlay(message, args.join(" "));
+    if (cmd === "play") return handlePlay(message, parts.join(" "));
     if (cmd === "skip") return handleSkip(message);
     if (cmd === "stop") return handleStop(message);
     if (cmd === "pause") return handlePause(message);
@@ -48,7 +68,6 @@ client.on("messageCreate", async (message) => {
 async function handlePlay(message, query) {
   const voiceChannel = message.member?.voice?.channel;
   if (!voiceChannel) return message.reply("ادخل روم صوتي أولًا 👂");
-
   if (!query) return message.reply("اكتب رابط يوتيوب أو كلمات بحث بعد الأمر.");
 
   let url = query;
@@ -75,11 +94,8 @@ async function handlePlay(message, query) {
 
     queue.player.on(AudioPlayerStatus.Idle, () => {
       queue.songs.shift();
-      if (queue.songs.length) {
-        playSong(guildId);
-      } else {
-        queue.playing = false;
-      }
+      if (queue.songs.length) playSong(guildId);
+      else queue.playing = false;
     });
 
     queue.player.on("error", (err) => {
@@ -93,8 +109,8 @@ async function handlePlay(message, query) {
   let info;
   try {
     info = await ytdl.getInfo(url);
-  } catch (e) {
-    return message.reply("تعذر جلب الفيديو.");
+  } catch {
+    return message.reply("تعذر جلب معلومات الفيديو. جرّب رابط/بحث مختلف.");
   }
   const title = info.videoDetails.title;
 
@@ -118,7 +134,11 @@ function playSong(guildId) {
   if (!queue || !queue.songs.length) return;
 
   const current = queue.songs[0];
-  const stream = ytdl(current.url, { filter: "audioonly", highWaterMark: 1 << 25, quality: "highestaudio" });
+  const stream = ytdl(current.url, {
+    filter: "audioonly",
+    highWaterMark: 1 << 25,
+    quality: "highestaudio"
+  });
   const resource = createAudioResource(stream);
   queue.player.play(resource);
   queue.playing = true;
